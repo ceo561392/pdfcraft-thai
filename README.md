@@ -1,6 +1,6 @@
 # PdfCraft Thai editing build
 
-Private, unofficial Thai editing build based on [PdfCraft by the ArtCraft team](https://github.com/storytold/pdfcraft). This repository is not an official ArtCraft release. Upstream trademark artwork has been removed; upstream copyright and open-source licence notices remain intact.
+Public, unofficial Thai editing build based on [PdfCraft by the ArtCraft team](https://github.com/storytold/pdfcraft). This repository is not an official ArtCraft release. Upstream trademark artwork has been removed; upstream copyright and open-source licence notices remain intact.
 
 - [Windows installer and portable build](https://github.com/ceo561392/pdfcraft-thai/releases)
 - Thai editing uses bundled Sarabun Regular/Bold and preserves tone/vowel positioning.
