@@ -918,6 +918,102 @@ fn thai_existing_text_formatting_uses_the_real_bold_face() {
     }
 }
 
+#[test]
+fn thai_mixed_style_rows_save_and_remain_editable() {
+    if pdfcraft_fonts::document_thai_edit_font(false).is_none() {
+        return;
+    }
+    let mut doc = text_page("BT /F1 16 Tf 72 700 Td (Label) Tj ET");
+    let replacement = "Hello ผู้รับผิดชอบ น้ำ กิ่";
+    let start = replacement.find("น้ำ").unwrap();
+    let style = BlockStyle {
+        ranges: vec![RangeStyle {
+            range: start..replacement.len(),
+            family: Some((Family::Helvetica, true, false)),
+            resource: None,
+            size: Some(18.0),
+            color: Some([0.8, 0.1, 0.2]),
+            underline: Some(true),
+            char_spacing: None,
+            scale: None,
+        }],
+        ..Default::default()
+    };
+    text::rewrite_block(&mut doc, 0, 0, Some(replacement), &style).unwrap();
+    doc = reopen(&doc);
+    assert_eq!(text::text_blocks(&doc, 0).unwrap()[0].text, replacement);
+    let lines = text::text_lines(&doc, 0).unwrap();
+    assert!(lines.iter().any(|l| l.text.contains("น้ำ") && l.color == [0.8, 0.1, 0.2] && l.size == 18.0 && l.bold));
+    assert!(lines.iter().any(|l| l.text.contains("Hello") && l.color == [0.0; 3] && !l.bold));
+    let changed = replacement.replace("ผู้รับผิดชอบ", "ผู้ใช้งาน");
+    text::replace_block(&mut doc, 0, 0, &changed).unwrap();
+    assert_eq!(text::text_blocks(&reopen(&doc), 0).unwrap()[0].text, changed);
+}
+
+#[test]
+fn thai_style_boundary_inside_marks_keeps_the_base_cluster_together() {
+    if pdfcraft_fonts::document_thai_edit_font(false).is_none() {
+        return;
+    }
+    let mut doc = text_page("BT /F1 16 Tf 72 700 Td (Label) Tj ET");
+    let replacement = "กิ่ น้ำ Hello";
+    let style = BlockStyle {
+        // A source PDF or selection can put a style boundary between base and marks.
+        ranges: vec![RangeStyle {
+            range: "ก".len().."กิ่".len(),
+            family: Some((Family::Helvetica, true, false)),
+            resource: None,
+            size: Some(24.0),
+            color: Some([1.0, 0.0, 0.0]),
+            underline: None,
+            char_spacing: None,
+            scale: None,
+        }],
+        ..Default::default()
+    };
+    text::rewrite_block(&mut doc, 0, 0, Some(replacement), &style).unwrap();
+    let ops = pdfcraft_content::parse(&page_content_bytes(&doc, 0)).ops;
+    let actual: Vec<_> = ops
+        .iter()
+        .filter(|o| o.is("BDC"))
+        .filter_map(|o| {
+            o.operands.get(1)?.as_dict()?.get(b"ActualText").and_then(|v| match v {
+                Object::String(s) => Some(s.to_text()),
+                _ => None,
+            })
+        })
+        .collect();
+    assert!(actual.iter().any(|s| s.starts_with("กิ่")), "a complete Thai cluster must be shaped together: {actual:?}");
+    let reopened = reopen(&doc);
+    assert_eq!(text::text_blocks(&reopened, 0).unwrap()[0].text, replacement);
+    assert!(text::text_lines(&reopened, 0).unwrap().iter().all(|l| l.color == [0.0; 3] && l.size == 16.0));
+}
+
+#[test]
+fn thai_character_spacing_moves_the_next_cluster_without_displacing_marks() {
+    if pdfcraft_fonts::document_thai_edit_font(false).is_none() {
+        return;
+    }
+    let positions = |spacing| {
+        let mut doc = text_page("BT /F1 16 Tf 72 700 Td (Label) Tj ET");
+        let style = BlockStyle { char_spacing: Some(spacing), ..Default::default() };
+        text::rewrite_block(&mut doc, 0, 0, Some("กิ่ก"), &style).unwrap();
+        pdfcraft_content::parse(&page_content_bytes(&doc, 0))
+            .ops
+            .into_iter()
+            .filter(|op| op.is("Tm"))
+            .map(|op| op.operands.get(4).and_then(Object::as_f64).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let plain = positions(0.0);
+    let spaced = positions(1.0);
+    assert_eq!(plain.len(), 4);
+    for i in 0..3 {
+        assert!((plain[i] - spaced[i]).abs() < 1e-6, "base and marks keep the same relative position");
+    }
+    assert!((spaced[3] - plain[3] - 3.0).abs() < 1e-6, "spacing is applied after the complete cluster");
+}
+
 /// One page with Helvetica (WinAnsi) and a subset font that has only the glyphs it uses.
 fn text_page(content: &str) -> Document {
     let objs: Vec<String> = vec![

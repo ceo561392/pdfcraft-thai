@@ -1,6 +1,45 @@
 //! Geometry-based regions and mixed-style rewriting of existing text.
 
 use super::*;
+use unicode_segmentation::UnicodeSegmentation;
+
+/// PDF text operators and formatting selections can split a Thai base from its marks.
+/// Shape that grapheme with the base's style; preserve every style boundary outside it.
+fn thai_cluster_spans(draft: &str, spans: Vec<(std::ops::Range<usize>, usize)>) -> Vec<(std::ops::Range<usize>, usize)> {
+    if !draft.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c)) {
+        return spans;
+    }
+    let mut spans = spans.into_iter().peekable();
+    let mut result: Vec<(std::ops::Range<usize>, usize)> = Vec::new();
+    for (start, cluster) in draft.grapheme_indices(true) {
+        let end = start + cluster.len();
+        while spans.peek().is_some_and(|(range, _)| range.end <= start) {
+            spans.next();
+        }
+        let thai = cluster.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
+        let mut at = start;
+        while let Some((range, index)) = spans.peek() {
+            if range.start >= end {
+                break;
+            }
+            let to = if thai { end } else { range.end.min(end) };
+            if let Some((previous, source)) = result.last_mut()
+                && *source == *index
+                && previous.end == at
+            {
+                previous.end = to;
+            } else {
+                result.push((at..to, *index));
+            }
+            at = to;
+            if at == end {
+                break;
+            }
+            spans.next();
+        }
+    }
+    result
+}
 
 fn same_plane(a: &TextLine, b: &TextLine) -> bool {
     let at = Matrix(a.origin.tm).then(&Matrix(a.origin.ctm));
@@ -393,7 +432,7 @@ pub(super) fn rewrite_styled_block(
     let mut fallback_names: std::collections::BTreeMap<(String, char), String> = std::collections::BTreeMap::new();
     let mut full_faces: HashMap<String, String> = HashMap::new();
     let mut programs: HashMap<String, Option<std::sync::Arc<Vec<u8>>>> = HashMap::new();
-    for (range, index) in styled_spans {
+    for (range, index) in thai_cluster_spans(draft, styled_spans) {
         let source = lines.get(index).unwrap_or(first);
         let input = draft.get(range.clone()).unwrap_or_default();
         let explicit_font = overrides.get(&index).and_then(|r| r.resource.as_ref()).or(style.resource.as_ref());
@@ -683,7 +722,12 @@ pub(super) fn rewrite_styled_block(
     };
     for (row, _) in rows.iter().zip(&kept).filter(|(_, k)| !**k) {
         let text: String = row.iter().map(|v| v.0).collect();
-        if pdfcraft_fonts::source_shaping::required(&text) && row.first().is_some_and(|first| row.iter().any(|v| v.1 != first.1 || v.2 != first.2)) {
+        // Thai is left-to-right and can be shaped across separate styled runs once
+        // each grapheme is intact. Other contextual scripts still need row-wide bidi.
+        let other_contextual: String = text.chars().filter(|c| !('\u{0e00}'..='\u{0e7f}').contains(c)).collect();
+        if pdfcraft_fonts::source_shaping::required(&other_contextual)
+            && row.first().is_some_and(|first| row.iter().any(|v| v.1 != first.1 || v.2 != first.2))
+        {
             return Err(EditError::Invalid(
                 "contextual/bidi text across font or style boundaries needs a uniform full-face row; mixed contextual runs are not yet supported"
                     .into(),
@@ -805,7 +849,13 @@ pub(super) fn rewrite_styled_block(
                 // codes are separate from Unicode and ToUnicode/ActualText keep logical text.
                 let size = size_of(source, item.1);
                 let mut extra = 0.0;
+                let mut cluster_spacing = 0.0;
                 for (i, glyph) in shaped.glyphs.iter().enumerate() {
+                    if !glyph.text.is_empty() {
+                        extra += cluster_spacing;
+                        cluster_spacing =
+                            state.char_spacing * glyph.text.chars().count() as f64 + state.word_spacing * glyph.text.matches(' ').count() as f64;
+                    }
                     let mut matrix = tm;
                     let x = (glyph.position[0] * size + extra) * state.scale;
                     let y = glyph.position[1] * size;
@@ -817,8 +867,8 @@ pub(super) fn rewrite_styled_block(
                     block_ops.push(Op::new("Tm", matrix.map(n).to_vec()));
                     block_ops.push(Op::new("Tj", vec![Object::String(PdfString::literal(code.to_be_bytes().to_vec()))]));
                     block_ops.push(Op::new("ET", vec![]));
-                    extra += state.char_spacing * glyph.text.chars().count() as f64 + state.word_spacing * glyph.text.matches(' ').count() as f64;
                 }
+                extra += cluster_spacing;
                 block_ops.push(Op::new("EMC", vec![]));
                 segment_width = (shaped.advance * size + extra) * state.scale * source.origin.k;
             } else {

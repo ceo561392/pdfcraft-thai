@@ -1,5 +1,9 @@
 # PdfCraft roadmap
 
+> Local update, 2026-10-16 (M7): Thai mixed-font/style rows now save and reopen;
+> grapheme boundaries preserve base/mark shaping and character spacing. Three new
+> regressions pass with the 161-test edit suite. Scope and estimates unchanged.
+
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-14 · **Change:** minor (M14: the Italian catalog has every entry the other catalogs had and the code looks up; estimates unchanged) · **Target:** Adobe Acrobat Pro (Acrobat DC, continuous track 26.002.21931, macOS)
@@ -495,6 +499,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | minor | M7 thai.3: mixed-style Thai edits save/reopen/re-edit; graphemes inherit the base style and spacing no longer displaces marks. Three regressions, edit suite 161 passing. Estimates unchanged. |
 | 2026-10-12 | minor | M6: valid AcroForm XML element names with original PDF field names preserved; saved-PDF collision and Unicode regressions. Estimates unchanged. |
 | 2026-10-12 | minor | M6: preserve carriage returns in exported CSV field names and values; saved-PDF round-trip coverage. Estimates unchanged. |
 | 2026-10-13 | minor | M4: Insert-from-file preserves source bookmarks; integration tests retained with current main. Estimates unchanged. |
