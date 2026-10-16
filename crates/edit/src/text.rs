@@ -64,9 +64,17 @@ pub struct TextLine {
     /// Some of the line's text is `/ActualText`, which is already in logical order: visual-order
     /// Indic recovery would scramble it.
     actual_text: bool,
+    /// Size compensation for the approved regular/bold Thai fallbacks, per source face.
+    thai_scales: [f64; 2],
 }
 
 impl TextLine {
+    /// Relative size of the approved Thai fallback for this source face. It is applied
+    /// only on automatic substitution; a usable source face or an explicit size wins.
+    pub fn thai_fallback_scale(&self, bold: bool) -> f64 {
+        self.thai_scales.get(usize::from(bold)).copied().unwrap_or(1.0)
+    }
+
     /// Origin of the source baseline in PDF user space, independent of font ascent/descent.
     pub fn baseline(&self) -> [f64; 2] {
         [self.origin.x, self.origin.baseline]
@@ -1065,6 +1073,7 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
                 scope: s.scope,
                 logical_order: s.logical_order,
                 actual_text: s.actual_text,
+                thai_scales: [1.0; 2],
                 ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
                 origin: Origin {
                     tm: s.tm.0,
@@ -1091,6 +1100,19 @@ pub fn text_lines(doc: &Document, page: usize) -> Result<Vec<TextLine>, EditErro
     }
     // Lines of only spaces aren't editable text.
     lines.retain(|l| !l.text.trim().is_empty());
+    let mut thai_scales = HashMap::new();
+    for line in &mut lines {
+        line.thai_scales = *thai_scales.entry(line.font.clone()).or_insert_with(|| {
+            [false, true].map(|bold| {
+                cache
+                    .get(line.font.as_bytes())
+                    .and_then(|(metrics, _)| {
+                        pdfcraft_fonts::document_thai_edit_font(bold).map(|face| pdfcraft_fonts::embedding::thai_fallback_scale(metrics, face.bytes))
+                    })
+                    .unwrap_or(1.0)
+            })
+        });
+    }
     Ok(lines)
 }
 
@@ -1152,6 +1174,7 @@ fn add_shown(lines: &mut Vec<TextLine>, last: &mut Option<Pen>, s: Shown, stream
             scope: s.scope,
             logical_order: s.logical_order,
             actual_text: s.actual_text,
+            thai_scales: [1.0; 2],
             ops: std::iter::once(s.op).chain(s.extra_ops.iter().copied()).collect(),
             origin: Origin {
                 tm: s.tm.0,

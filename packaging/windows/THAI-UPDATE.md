@@ -13,6 +13,13 @@ or selections split a base from its marks; the base's style applies to that grap
 Other style boundaries survive, including English, bold, colour and size. Character
 spacing is applied after a complete shaped cluster, without shifting its marks.
 
+Version thai.4 compensates automatic Thai substitution for compact source fonts.
+It compares the source PDF's mapped Thai base-letter advances with the fallback,
+using a bounded median ratio. Preview and saved text use the same compensation;
+explicit sizes and usable source faces remain authoritative. Sparse or invalid
+metrics leave the size unchanged. This approximates the original proportions;
+it does not reproduce a different typeface's exact glyph design.
+
 Sarabun Regular and Bold come unmodified from
 [google/fonts at 88058c7](https://github.com/google/fonts/tree/88058c714073e72bb1b32baffc2d4ce9bc73944c/ofl/sarabun),
 by the Sarabun Project Authors (cadsondemak), under OFL-1.1. Font binaries stay in the
@@ -23,7 +30,7 @@ With Rust/MSVC, the Windows SDK and WiX 5.0.2 available, run from the repository
 
 ```powershell
 ./packaging/windows/prepare-thai-fonts.ps1 -FontRoot ../craft-fonts
-$env:PDFCRAFT_VERSION = '0.8.0-thai.3'
+$env:PDFCRAFT_VERSION = '0.8.0-thai.4'
 $env:PDFCRAFT_BUILD_SHA = 'local-thai-fix'
 ./packaging/windows/package.ps1 -Arch x64
 ```
@@ -40,6 +47,8 @@ attribution remain intact.
 Validation covers the reproduced failure, repeated edits and saves/reopens, real bold
 fallback selection, keyboard entry/apply/undo/redo and an eleven-step CLI smoke test.
 Thai mixed-style regressions cover save/reopen/re-edit, boundaries inside combining marks
-and nonzero character spacing. Thai word wrapping still uses spaces. Rotated text and
-non-Thai contextual text across style/font boundaries remain partial. The original user PDF was not supplied; validation uses
-synthetic documents only.
+and nonzero character spacing. Compact-font regressions cover preview/save size,
+repeated saves, English neighbours and explicit sizes. Thai word wrapping still uses spaces. Rotated text and
+non-Thai contextual text across style/font boundaries remain partial. A supplied PDF
+was checked locally for font metadata and copy-only edits. Repository fixtures and
+published examples use synthetic documents; the supplied PDF stays private.

@@ -26,6 +26,37 @@ pub fn covers(bytes: &[u8], text: &str) -> bool {
     FontRef::new(bytes).is_ok_and(|f| text.chars().all(|c| matches!(c, '\n' | '\r') || f.charmap().map(c).is_some_and(|g| g.to_u32() != 0)))
 }
 
+/// Match a Thai fallback's apparent size to a source PDF's em proportions. Use the
+/// median advance ratio of mapped Thai base letters, excluding marks and spacing.
+/// This needs no source font program and never fits new text to an old line width.
+/// Sparse, malformed or implausible metrics leave the requested size unchanged.
+pub fn thai_fallback_scale(source: &crate::pdf::Metrics, bytes: &[u8]) -> f64 {
+    let Ok(face) = FontRef::new(bytes) else { return 1.0 };
+    let units = f64::from(face.metrics(Size::unscaled(), LocationRef::default()).units_per_em);
+    if units <= 0.0 {
+        return 1.0;
+    }
+    let advances = face.glyph_metrics(Size::unscaled(), LocationRef::default());
+    let charmap = face.charmap();
+    let mut ratios = Vec::new();
+    for ch in (0x0e01..=0x0e2e).filter_map(char::from_u32) {
+        let Some(encoded) = source.encode(&ch.to_string()) else { continue };
+        let codes = source.codes(&encoded);
+        let [(code, _)] = codes.as_slice() else { continue };
+        let Some(glyph) = charmap.map(ch).filter(|g| g.to_u32() != 0) else { continue };
+        let Some(advance) = advances.advance_width(glyph).map(f64::from).filter(|v| *v > 0.0) else { continue };
+        let ratio = source.width(*code) / (advance / units);
+        if ratio.is_finite() && (0.25..=4.0).contains(&ratio) {
+            ratios.push(ratio);
+        }
+    }
+    if ratios.len() < 3 {
+        return 1.0;
+    }
+    ratios.sort_by(f64::total_cmp);
+    ratios.get(ratios.len() / 2).copied().unwrap_or(1.0)
+}
+
 /// Names come from the program, never a caller's guessed family.
 pub fn names(bytes: &[u8]) -> Result<(String, String), String> {
     use skrifa::string::StringId;

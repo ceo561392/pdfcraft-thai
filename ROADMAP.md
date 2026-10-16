@@ -499,6 +499,7 @@ Newest first: the date, what moved, and the new overall estimate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | minor | M7 thai.4: automatic Thai fallback size matches compact source metrics in preview and save; repeated edits, English neighbours and explicit sizes covered. Original document remains private. Estimates unchanged. |
 | 2026-10-16 | minor | M7 thai.3: mixed-style Thai edits save/reopen/re-edit; graphemes inherit the base style and spacing no longer displaces marks. Three regressions, edit suite 161 passing. Estimates unchanged. |
 | 2026-10-12 | minor | M6: valid AcroForm XML element names with original PDF field names preserved; saved-PDF collision and Unicode regressions. Estimates unchanged. |
 | 2026-10-12 | minor | M6: preserve carriage returns in exported CSV field names and values; saved-PDF round-trip coverage. Estimates unchanged. |

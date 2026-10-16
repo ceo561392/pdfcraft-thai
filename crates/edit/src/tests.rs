@@ -1041,6 +1041,95 @@ fn text_page(content: &str) -> Document {
     Document::open(Arc::new(out)).unwrap()
 }
 
+/// Synthetic Thai face with 60% of the approved fallback's advances; no font program.
+fn compact_thai_text_page() -> Document {
+    let face = pdfcraft_fonts::document_thai_edit_font(false).unwrap();
+    let mut widths: Vec<_> =
+        "กขค".chars().map(|c| Object::Real(pdfcraft_fonts::source_shaping::shape(face.bytes, &c.to_string()).unwrap().advance * 600.0)).collect();
+    widths.push(Object::Real(500.0));
+    let cmap =
+        b"begincmap 1 begincodespacerange <0000> <FFFF> endcodespacerange 4 beginbfchar <0001> <0E01> <0002> <0E02> <0003> <0E04> <0004> <0078> endbfchar endcmap";
+    let mut doc = text_page("BT /F2 15 Tf 72 700 Td <000100020003000100020003> Tj ET BT /F1 12 Tf 300 700 Td (Hello) Tj ET");
+    let unicode = Object::Ref(doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(Dict::new(), cmap.to_vec()))));
+    let mut descendant = Dict::new();
+    descendant.set(b"Type".to_vec(), Object::name("Font"));
+    descendant.set(b"Subtype".to_vec(), Object::name("CIDFontType2"));
+    descendant.set(b"BaseFont".to_vec(), Object::name("SyntheticCompactThai"));
+    descendant.set(b"W".to_vec(), Object::Array(vec![Object::Int(1), Object::Array(widths)]));
+    doc.update_dict(pdfcraft_cos::ObjRef::new(6, 0), |font| {
+        *font = Dict::new();
+        font.set(b"Type".to_vec(), Object::name("Font"));
+        font.set(b"Subtype".to_vec(), Object::name("Type0"));
+        font.set(b"BaseFont".to_vec(), Object::name("SyntheticCompactThai"));
+        font.set(b"Encoding".to_vec(), Object::name("Identity-H"));
+        font.set(b"DescendantFonts".to_vec(), Object::Array(vec![Object::Dict(descendant)]));
+        font.set(b"ToUnicode".to_vec(), unicode);
+    })
+    .unwrap();
+    doc
+}
+
+#[test]
+fn compact_thai_source_keeps_its_apparent_size_after_fallback_and_repeated_save() {
+    if pdfcraft_fonts::document_thai_edit_font(false).is_none() {
+        return;
+    }
+    let mut doc = compact_thai_text_page();
+    assert_eq!(text::text_lines(&doc, 0).unwrap()[0].size, 15.0);
+    for replacement in ["กขคกขคง", "กขคกขคงจ"] {
+        text::replace_block(&mut doc, 0, 0, replacement).unwrap();
+        doc = reopen(&doc);
+        let lines = text::text_lines(&doc, 0).unwrap();
+        let thai = lines.iter().find(|l| l.text == replacement).unwrap();
+        assert!((thai.size - 9.0).abs() < 0.02, "15 pt compact source needs a 9 pt fallback, got {}", thai.size);
+        let english = lines.iter().find(|l| l.text == "Hello").unwrap();
+        assert_eq!((english.size, english.baseline()), (12.0, [300.0, 700.0]));
+    }
+}
+
+#[test]
+fn explicit_thai_size_is_honoured_instead_of_automatic_size_matching() {
+    if pdfcraft_fonts::document_thai_edit_font(false).is_none() {
+        return;
+    }
+    let mut doc = compact_thai_text_page();
+    let style = BlockStyle { size: Some(20.0), ..Default::default() };
+    text::rewrite_block(&mut doc, 0, 0, Some("กขคกขคง"), &style).unwrap();
+    let reopened = reopen(&doc);
+    assert_eq!(text::text_lines(&reopened, 0).unwrap()[0].size, 20.0);
+}
+
+#[test]
+fn automatic_thai_size_does_not_shrink_a_reused_latin_source_run() {
+    if pdfcraft_fonts::document_thai_edit_font(false).is_none() {
+        return;
+    }
+    let mut doc = compact_thai_text_page();
+    let content = Object::Ref(
+        doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(Dict::new(), b"BT /F2 15 Tf 72 700 Td <0001000200030001000200030004> Tj ET".to_vec()))),
+    );
+    doc.update_dict(pdfcraft_cos::ObjRef::new(3, 0), |p| p.set(b"Contents".to_vec(), content)).unwrap();
+    let replacement = "กขคกขคงx";
+    let style = BlockStyle {
+        ranges: vec![RangeStyle {
+            range: "กขค".len().."กขคกขคง".len(),
+            family: None,
+            resource: None,
+            size: None,
+            color: Some([1.0, 0.0, 0.0]),
+            underline: None,
+            char_spacing: None,
+            scale: None,
+        }],
+        ..Default::default()
+    };
+    text::rewrite_block(&mut doc, 0, 0, Some(replacement), &style).unwrap();
+    let reopened = reopen(&doc);
+    let lines = text::text_lines(&reopened, 0).unwrap();
+    assert_eq!(lines.iter().find(|l| l.text == "x").unwrap().size, 15.0);
+    assert!(lines.iter().filter(|l| l.text != "x").all(|l| (l.size - 9.0).abs() < 0.02));
+}
+
 fn descriptor_text_page() -> Document {
     let content = "BT /F1 12 Tf 72 700 Td (ab) Tj ET";
     let objs: Vec<String> = vec![

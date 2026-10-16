@@ -2544,6 +2544,66 @@ fn deleting_a_draft_does_not_show_the_original_text_underneath() {
 }
 
 #[test]
+fn compact_thai_fallback_preview_and_saved_size_agree() {
+    use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream};
+    use std::sync::Arc;
+    let Some(face) = pdfcraft_fonts::document_thai_edit_font(false) else { return };
+    let mut source = Document::open(Arc::new(fixture(1))).unwrap();
+    let widths =
+        "กขค".chars().map(|c| Object::Real(pdfcraft_fonts::source_shaping::shape(face.bytes, &c.to_string()).unwrap().advance * 600.0)).collect();
+    let cmap = b"begincmap 1 begincodespacerange <00> <FF> endcodespacerange 3 beginbfchar <61> <0E01> <62> <0E02> <63> <0E04> endbfchar endcmap";
+    let unicode = Object::Ref(source.add(Object::Stream(Stream::from_raw(Dict::new(), cmap.to_vec()))));
+    source
+        .update_dict(ObjRef::new(3, 0), |f| {
+            f.set(b"BaseFont".to_vec(), Object::name("SyntheticCompactThai"));
+            f.set(b"FirstChar".to_vec(), Object::Int(97));
+            f.set(b"LastChar".to_vec(), Object::Int(99));
+            f.set(b"Widths".to_vec(), Object::Array(widths));
+            f.set(b"ToUnicode".to_vec(), unicode);
+        })
+        .unwrap();
+    let content = Object::Ref(source.add(Object::Stream(Stream::from_raw(Dict::new(), b"BT /F1 15 Tf 20 150 Td (abcabc) Tj ET".to_vec()))));
+    source.update_dict(ObjRef::new(4, 0), |p| p.set(b"Contents".to_vec(), content)).unwrap();
+    let bytes = pdfcraft_cos::write_full(&source, &SaveOptions::default()).unwrap();
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_eframe(move |_| {
+        let mut app = PdfCraftApp::new();
+        app.set_option("language", "en").unwrap();
+        app.open_bytes("compact-thai.pdf", None, bytes).unwrap();
+        app
+    });
+    h.run_steps(4);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let page = h.state().views[0].page_screen_rect(0).unwrap();
+    let at = egui::pos2(page.left() + 30.0 / 200.0 * page.width(), page.top() + 145.0 / 300.0 * page.height());
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(4);
+    assert!(h.state().views[0].line_editor.is_some());
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.event(egui::Event::Text("กขคกขคง".into()));
+    h.run_steps(4);
+    let galley = h
+        .output()
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if t.galley.text() == "กขคกขคง" => Some(&t.galley),
+            _ => None,
+        })
+        .unwrap();
+    let expected = 9.0 * page.width() / 200.0;
+    assert!(galley.job.sections.iter().all(|s| (s.format.font_id.size - expected).abs() < 0.1));
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    h.run_steps(4);
+    let doc = h.state().session.get(h.state().views[0].id).unwrap();
+    assert!((doc.text_lines(0)[0].size - 9.0).abs() < 0.02);
+}
+
+#[test]
 fn switching_from_a_narrow_editor_keeps_one_frame_and_a_wide_heading_on_one_line() {
     let bytes = source_font_fixture_with_text(
         "BT /F1 18 Tf 20 220 Td (Editable PDF heading) Tj ET BT /F2 18 Tf 20 120 Td (Mono) Tj ET BT /F2 18 Tf 20 98 Td (Text) Tj ET",

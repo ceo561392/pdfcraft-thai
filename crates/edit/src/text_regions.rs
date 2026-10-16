@@ -432,10 +432,12 @@ pub(super) fn rewrite_styled_block(
     let mut fallback_names: std::collections::BTreeMap<(String, char), String> = std::collections::BTreeMap::new();
     let mut full_faces: HashMap<String, String> = HashMap::new();
     let mut programs: HashMap<String, Option<std::sync::Arc<Vec<u8>>>> = HashMap::new();
+    let mut thai_sizes = HashMap::new();
     for (range, index) in thai_cluster_spans(draft, styled_spans) {
         let source = lines.get(index).unwrap_or(first);
         let input = draft.get(range.clone()).unwrap_or_default();
         let explicit_font = overrides.get(&index).and_then(|r| r.resource.as_ref()).or(style.resource.as_ref());
+        let mut thai_size = None;
         // Keep a complete source face when it can shape the entire run. If a Thai subset
         // cannot, replace the whole run, not individual characters: marks and Sara Am
         // require their base letters in the same font/shaping buffer.
@@ -455,6 +457,9 @@ pub(super) fn rewrite_styled_block(
                             .into(),
                     )
                 })?;
+                if style.size.is_none() && overrides.get(&index).is_none_or(|r| r.size.is_none()) {
+                    thai_size = Some(source.thai_fallback_scale(source.bold));
+                }
                 if !pdfcraft_fonts::embedding::covers(face.bytes, input) {
                     return Err(EditError::Invalid(
                         "the Thai fallback cannot show every character in this run; select a complete font for it".into(),
@@ -476,6 +481,9 @@ pub(super) fn rewrite_styled_block(
                 full_faces.insert(key, name.clone());
                 name
             };
+            if let Some(size) = thai_size {
+                thai_sizes.entry(index).or_insert_with(HashMap::new).insert(name.clone(), size);
+            }
             Some(name)
         } else {
             None
@@ -575,8 +583,9 @@ pub(super) fn rewrite_styled_block(
             chars.push((ch, index, name));
         }
     }
-    let size_of = |source: &TextLine, index: usize| {
+    let size_of = |source: &TextLine, index: usize, resource: &str| {
         overrides.get(&index).and_then(|r| r.size).or(style.size).unwrap_or(source.size).max(0.1) / source.origin.k.max(1e-6)
+            * thai_sizes.get(&index).and_then(|fonts| fonts.get(resource)).copied().unwrap_or(1.0)
     };
     // A source run may carry TJ kerning/justification that is absent from its text state.
     // Keep its measured advance when rebuilding the run instead of making it wrap on entry.
@@ -603,7 +612,7 @@ pub(super) fn rewrite_styled_block(
         source_width(
             m,
             &item.0.to_string(),
-            size_of(source, item.1),
+            size_of(source, item.1, &item.2),
             source_space(doc, &fonts, m),
             overrides
                 .get(&item.1)
@@ -634,7 +643,7 @@ pub(super) fn rewrite_styled_block(
                     .and_then(|r| r.char_spacing)
                     .or(style.char_spacing)
                     .map_or(source.origin.state.char_spacing, |s| s / source.origin.k.max(1e-6));
-                width += (shaped.advance * size_of(source, item.1)
+                width += (shaped.advance * size_of(source, item.1, &item.2)
                     + spacing * string.chars().count() as f64
                     + source.origin.state.word_spacing * string.matches(' ').count() as f64)
                     * scale
@@ -820,7 +829,7 @@ pub(super) fn rewrite_styled_block(
             let string: String = segment.iter().map(|c| c.0).collect();
             let m = metrics.get(&item.2).ok_or_else(|| EditError::Invalid("the paragraph font is missing".into()))?;
             let mut state = source.origin.state.clone();
-            state.font = Some((item.2.clone(), size_of(source, item.1)));
+            state.font = Some((item.2.clone(), size_of(source, item.1, &item.2)));
             if let Some(c) = overrides.get(&item.1).and_then(|r| r.char_spacing).or(style.char_spacing) {
                 state.char_spacing = c / source.origin.k.max(1e-6);
             }
@@ -844,10 +853,10 @@ pub(super) fn rewrite_styled_block(
                 let mut properties = Dict::new();
                 properties.set(b"ActualText".to_vec(), Object::String(PdfString::text(&string)));
                 block_ops.push(Op::new("BDC", vec![Object::name("Span"), Object::Dict(properties)]));
-                state.font = Some((resource.clone(), size_of(source, item.1)));
+                state.font = Some((resource.clone(), size_of(source, item.1, &item.2)));
                 // Absolute glyph matrices preserve marks and contextual positions; font-program
                 // codes are separate from Unicode and ToUnicode/ActualText keep logical text.
-                let size = size_of(source, item.1);
+                let size = size_of(source, item.1, &item.2);
                 let mut extra = 0.0;
                 let mut cluster_spacing = 0.0;
                 for (i, glyph) in shaped.glyphs.iter().enumerate() {
@@ -878,7 +887,7 @@ pub(super) fn rewrite_styled_block(
                 block_ops.extend(source_show(
                     m,
                     &string,
-                    size_of(source, item.1),
+                    size_of(source, item.1, &item.2),
                     source_space(doc, &fonts, m),
                     state.char_spacing,
                     state.word_spacing,
@@ -887,7 +896,7 @@ pub(super) fn rewrite_styled_block(
             }
             if underlines.get(&item.1).copied().or(style.underline) == Some(true) {
                 let [r, g, b] = overrides.get(&item.1).and_then(|r| r.color).or(style.color).unwrap_or(source.color);
-                let underline_size = size_of(source, item.1) * source.origin.k;
+                let underline_size = size_of(source, item.1, &item.2) * source.origin.k;
                 let (x0, y0) = back.apply(x - first.origin.ctm[4], baseline - first.origin.ctm[5] - underline_size * 0.12);
                 let (x1, y1) = back.apply(x + segment_width - first.origin.ctm[4], baseline - first.origin.ctm[5] - underline_size * 0.12);
                 block_ops.push(Op::new("RG", vec![n(r), n(g), n(b)]));

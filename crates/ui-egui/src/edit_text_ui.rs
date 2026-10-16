@@ -1216,6 +1216,9 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
                 });
                 if !source_works && let Some(face) = pdfcraft_fonts::document_thai_edit_font(look.bold) {
                     font.family = FontFamily::Name(face.name().into());
+                    if ed.look.size == ed.look0.size && ed.font_resource.is_none() {
+                        font.size = (font.size * line.thai_fallback_scale(look.bold) as f32).clamp(1.0, 300.0);
+                    }
                 }
             }
             let native_width = ui.fonts_mut(|f| f.layout_no_wrap(line.text.clone(), font.clone(), Color32::BLACK).size().x);
