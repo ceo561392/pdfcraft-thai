@@ -542,7 +542,7 @@ impl Automation {
                     .collect();
                 json!({ "page": page + 1, "count": blocks.len(), "paragraphs": blocks })
             }
-            "text_font_files" => {
+            "text_font_files" | "text_match_fonts" => {
                 let roots = if let Some(paths) = a.get("directories") {
                     let paths = paths
                         .as_array()
@@ -563,7 +563,15 @@ impl Automation {
                 } else {
                     pdfcraft_engine::text_fonts::installed_directories()
                 };
-                json!({"fonts": pdfcraft_engine::text_fonts::discover(&roots).into_iter().map(|f| json!({"path":f.path,"family":f.family,"font":f.face})).collect::<Vec<_>>()})
+                let files = pdfcraft_engine::text_fonts::discover(&roots);
+                if name == "text_match_fonts" {
+                    let page = self.page(&a)?;
+                    let id = self.doc(&a)?.id;
+                    let matched = self.session.match_text_fonts(id, page, &files).map_err(failed)?;
+                    json!({"matched":matched,"document_unchanged":true})
+                } else {
+                    json!({"fonts": files.into_iter().map(|f| json!({"path":f.path,"family":f.family,"font":f.face,"face_index":f.index,"open_license":f.open_license})).collect::<Vec<_>>()})
+                }
             }
             "text_font_import" => {
                 let page = self.page(&a)?;
@@ -575,13 +583,19 @@ impl Automation {
                 if bytes.len() > 16 << 20 {
                     return Err(ToolError::InvalidArgs("font input exceeds 16 MiB".into()));
                 }
+                let index = a
+                    .get("face_index")
+                    .map(|v| v.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| Args::wrong("face_index", "nonnegative face index")))
+                    .transpose()?
+                    .unwrap_or(0);
+                let bytes = pdfcraft_engine::text_fonts::select_face(&bytes, index).map_err(failed)?;
                 let before: Vec<_> = self.doc(&a)?.text_editor_fonts(page).into_iter().map(|f| f.resource).collect();
                 let mut out = self.apply(&a, Edit::RegisterTextFont { page, bytes: Arc::new(bytes) })?;
                 let added = self
                     .doc(&a)?
                     .text_editor_fonts(page)
                     .into_iter()
-                    .find(|f| !before.contains(&f.resource) && !f.resource.starts_with("PCApproved"));
+                    .find(|f| !before.contains(&f.resource) && !(f.resource.starts_with("PCApproved") || f.resource.starts_with("PCMatched")));
                 if let Some(f) = added {
                     out["resource"] = json!(f.resource);
                     out["font"] = json!(f.face);
@@ -590,7 +604,7 @@ impl Automation {
             }
             "text_fonts" => {
                 let page = self.page(&a)?;
-                json!({"fonts": self.doc(&a)?.text_editor_fonts(page).into_iter().map(|f| json!({"resource":f.resource,"font":f.face,"full_face":f.resource.starts_with("PCFull"),"preview_only":f.resource.starts_with("PCApproved")})).collect::<Vec<_>>()})
+                json!({"fonts": self.doc(&a)?.text_editor_fonts(page).into_iter().map(|f| json!({"resource":f.resource,"font":f.face,"full_face":f.resource.starts_with("PCFull"),"preview_only":(f.resource.starts_with("PCApproved") || f.resource.starts_with("PCMatched"))})).collect::<Vec<_>>()})
             }
             "text_edit_layout" => {
                 let page = self.page(&a)?;
@@ -618,7 +632,7 @@ impl Automation {
                 };
                 let fonts: Vec<_> = doc.text_editor_fonts(page).into_iter().map(|f| json!({"resource": f.resource, "face": f.face})).collect();
                 json!({ "page": page + 1, "paragraph": k, "source_rect": view_rect(layout.source_rect),
-                    "draft_rect": layout.draft_rect.map(view_rect), "overflow": layout.overflow, "embedded_fonts": fonts })
+                    "draft_rect": layout.draft_rect.map(view_rect), "overflow": layout.overflow, "substituted_font": layout.substituted, "embedded_fonts": fonts })
             }
             "text_edit" if a.get("paragraph").is_some() => {
                 let page = self.page(&a)?;

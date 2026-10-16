@@ -232,7 +232,11 @@ fn shape_source(
             && pdfcraft_fonts::embedding::covers(&bytes, text)
             && let Ok(shaped) = pdfcraft_fonts::source_shaping::shape(&bytes, text)
         {
-            return Ok(Some((bytes, shaped, family)));
+            // A full installed face can complete a subset-tagged resource. Name the new
+            // mapping after its actual program, so the old subset tag cannot become part
+            // of the family identity when the PDF is edited again.
+            let postscript = pdfcraft_fonts::embedding::names(&bytes).map(|(_, name)| name).unwrap_or_else(|_| family.clone());
+            return Ok(Some((bytes, shaped, postscript)));
         }
     }
     Err(EditError::Invalid("complex text needs the complete source TrueType/OpenType face; load that font before editing".into()))
@@ -318,6 +322,7 @@ pub(super) fn rewrite_styled_block(
     let mut styled_spans = Vec::new();
     let mut underlines = HashMap::new();
     let mut overrides = HashMap::new();
+    let mut style_sources = HashMap::new();
     for (span, source) in block.edited_spans(draft) {
         let mut edges = vec![span.start, span.end];
         for r in &ranges {
@@ -372,6 +377,7 @@ pub(super) fn rewrite_styled_block(
                     line.origin.state.scale = (scale / 100.0).clamp(0.1, 10.0);
                 }
                 index = styled_lines.len();
+                style_sources.insert(index, source);
                 styled_lines.push(line);
                 if let Some(r) = selected {
                     overrides.insert(index, r);
@@ -435,6 +441,18 @@ pub(super) fn rewrite_styled_block(
     let mut thai_sizes = HashMap::new();
     for (range, index) in thai_cluster_spans(draft, styled_spans) {
         let source = lines.get(index).unwrap_or(first);
+        let basis = style_sources.get(&index).and_then(|i| lines.get(*i)).unwrap_or(source);
+        let source_resource = metrics
+            .iter()
+            .filter(|(_, m)| {
+                source.font.starts_with("PCRange")
+                    && source_family(&basis.base_font) == source_family(&source.base_font)
+                    && pdfcraft_fonts::document_face::family_key(&m.base_font) == pdfcraft_fonts::document_face::family_key(&basis.base_font)
+                    && m.bold == source.bold
+                    && m.italic == source.italic
+            })
+            .min_by_key(|(name, _)| (!name.starts_with("PCFull"), *name))
+            .map_or_else(|| source.font.clone(), |(name, _)| name.clone());
         let input = draft.get(range.clone()).unwrap_or_default();
         let explicit_font = overrides.get(&index).and_then(|r| r.resource.as_ref()).or(style.resource.as_ref());
         let mut thai_size = None;
@@ -443,13 +461,13 @@ pub(super) fn rewrite_styled_block(
         // require their base letters in the same font/shaping buffer.
         let thai_font = if explicit_font.is_none() && input.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c)) {
             let rows: Vec<_> = input.split('\n').filter(|r| !r.is_empty()).collect();
-            let source_face = rows.first().and_then(|row| shape_source(doc, &fonts, &source.font, row).ok().flatten()).filter(|(bytes, _, _)| {
+            let source_face = rows.first().and_then(|row| shape_source(doc, &fonts, &source_resource, row).ok().flatten()).filter(|(bytes, _, _)| {
                 pdfcraft_fonts::embedding::validate(bytes).is_ok()
                     && pdfcraft_fonts::embedding::covers(bytes, input)
                     && rows.iter().all(|row| pdfcraft_fonts::source_shaping::shape(bytes, row).is_ok())
             });
             let (bytes, family, key) = if let Some((bytes, _, family)) = source_face {
-                (bytes, family, format!("Thai source {}", source.font))
+                (bytes, family, format!("Thai source {source_resource}"))
             } else {
                 let face = pdfcraft_fonts::document_thai_edit_font(source.bold).ok_or_else(|| {
                     EditError::Invalid(
@@ -501,8 +519,8 @@ pub(super) fn rewrite_styled_block(
                     return Err(EditError::Invalid(format!("the selected font resource {resource} cannot show U+{:04X}", u32::from(ch))));
                 }
                 resource.clone()
-            } else if metrics.get(&source.font).is_some_and(|m| source_encodes(m, &s)) {
-                source.font.clone()
+            } else if metrics.get(&source_resource).is_some_and(|m| source_encodes(m, &s)) {
+                source_resource.clone()
             } else if let Some((name, _)) = metrics.iter().find(|(_, m)| {
                 pdfcraft_fonts::embedding::face_key(&m.base_font) == pdfcraft_fonts::embedding::face_key(&source.base_font) && source_encodes(m, &s)
             }) {

@@ -3079,6 +3079,21 @@ impl eframe::App for PdfCraftApp {
             ctx.request_repaint();
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(self.quick_tool, QuickTool::EditText | QuickTool::AddText)
+            && let Some(i) = self.active
+            && let Some(fonts) = files::installed_font_files(&ctx)
+        {
+            let id = self.views[i].id;
+            let page = self.views[i].line_editor.as_ref().map_or(self.views[i].current, |e| e.page);
+            if let Ok(added) = self.session.match_text_fonts_once(id, page, &fonts)
+                && !added.is_empty()
+                && let Some(doc) = self.session.get(id)
+                && let Some(ed) = self.views[i].line_editor.as_mut()
+            {
+                ed.fonts = edit_text_ui::install_source_fonts(&ctx, doc, page);
+            }
+        }
         for view in &mut self.views {
             view.begin_render_frame();
         }

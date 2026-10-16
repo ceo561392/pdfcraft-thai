@@ -30,11 +30,15 @@ pub(crate) struct TextBackground {
     texture: Option<egui::TextureHandle>,
     tag: Option<u64>,
     received: Option<u64>,
-    draft_key: Option<(String, pdfcraft_engine::BlockStyle)>,
+    draft_key: Option<(String, pdfcraft_engine::BlockStyle, usize)>,
     draft_rect: Option<[f64; 4]>,
+    substituted_font: Option<String>,
 }
 
 impl TextBackground {
+    pub fn substituted_font(&self) -> Option<&str> {
+        self.substituted_font.as_deref()
+    }
     pub fn pending(&self) -> bool {
         self.renderer.is_some() && self.received != self.tag
     }
@@ -62,9 +66,11 @@ impl TextBackground {
             }
         }
         if let Some(ed) = editor {
-            let draft_key = (ed.text.clone(), ed.style());
+            let draft_key = (ed.text.clone(), ed.style(), doc.text_font_generation());
             if self.draft_key.as_ref() != Some(&draft_key) {
-                self.draft_rect = doc.text_edit_layout(ed.page, ed.block, &ed.text, &draft_key.1).ok().and_then(|layout| layout.draft_rect);
+                let layout = doc.text_edit_layout(ed.page, ed.block, &ed.text, &draft_key.1).ok();
+                self.draft_rect = layout.as_ref().and_then(|layout| layout.draft_rect);
+                self.substituted_font = layout.and_then(|layout| layout.substituted);
                 self.draft_key = Some(draft_key);
             }
         }
@@ -1127,6 +1133,16 @@ pub(crate) fn install_source_fonts(ctx: &egui::Context, doc: &pdfcraft_engine::D
         definitions.font_data.insert(name.clone(), Arc::new(egui::FontData::from_owned(program.bytes.clone())));
         families.insert(program.resource.clone(), name);
     }
+    // Matched/full programs follow source subsets; prefer them for style changes.
+    for program in programs.iter().rev() {
+        if let Some(info) = pdfcraft_fonts::document_face::faces(&program.bytes).first()
+            && let Some(name) = families.get(&program.resource).cloned()
+        {
+            families
+                .entry(format!("PCStyle:{}:{}:{}", pdfcraft_fonts::document_face::family_key(&program.face), info.bold, info.italic))
+                .or_insert(name);
+        }
+    }
     for program in &programs {
         let Some(name) = families.get(&program.resource) else { continue };
         // Word-created PDFs often split one face into several subsets. Use all of the
@@ -1199,14 +1215,21 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
             let mut font = editor_font(&look, (look.size as f32 * scale).clamp(1.0, 300.0));
             let original_face = ed.look.family == ed.look0.family && ed.look.bold == ed.look0.bold && ed.look.italic == ed.look0.italic;
             let input = text.get(range.clone()).unwrap_or_default();
-            let embedded = original_face && ed.fonts.contains_key(&line.font);
-            if embedded && let Some(name) = ed.fonts.get(&line.font) {
+            let selected = if original_face {
+                ed.fonts.get(&line.font)
+            } else if ed.look.family == ed.look0.family {
+                ed.fonts.get(&format!("PCStyle:{}:{}:{}", pdfcraft_fonts::document_face::family_key(&line.base_font), look.bold, look.italic))
+            } else {
+                None
+            };
+            let embedded = selected.is_some();
+            if let Some(name) = selected {
                 font.family = FontFamily::Name(name.clone().into());
             }
             if input.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c)) {
                 // A subset's charmap may contain letters but lack the positioning tables,
                 // or newly typed marks. Give the whole Thai run to one complete face.
-                let source_works = ed.fonts.get(&line.font).is_some_and(|name| {
+                let source_works = selected.is_some_and(|name| {
                     ui.fonts(|fonts| {
                         fonts.definitions().font_data.get(name).is_some_and(|face| {
                             pdfcraft_fonts::embedding::covers(&face.font, input)

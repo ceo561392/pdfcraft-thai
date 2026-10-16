@@ -46,6 +46,17 @@ Anything else is forbidden, including assets whose licence you cannot prove from
 - "free for personal use" material;
 - screenshots of other people's software.
 
+**Private-fork runtime document-font exception (user approved, 2026-10-16):**
+An explicitly requested document-editing operation may match a PDF's existing font family
+and regular/bold/italic face to fonts already installed on that user's machine. Non-open
+fonts may be read into document-scoped memory and embedded only in that user's document
+when their licence permits it and their OpenType flags allow editable outline embedding.
+This does not permit extracting Adobe assets, bundling these fonts in the application or
+installer, committing/uploading font files, publishing font-bearing samples/screenshots,
+or installing/extracting embedded fonts for general use. Preserve font notices and shaping
+tables; refuse restricted/preview-only/bitmap-only embedding and respect no-subsetting.
+This exception concerns document fonts, never the system-interface fallback in §1.4.
+
 **Screenshots of PdfCraft** are contributor-original. Everything visible in them must itself be allowed: our UI, Lucide icons, OFL fonts, and demo documents built only from allowed assets. Never screenshot a document that uses proprietary fonts or images.
 
 ### 1.3 Every asset is attributed

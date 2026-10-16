@@ -386,6 +386,44 @@ fn tool_table_is_well_formed() {
 }
 
 #[test]
+fn document_font_matching_is_read_only_and_confined() {
+    use pdfcraft_cos::{Document, ObjRef, Object};
+    use std::sync::Arc;
+    let dir = workdir("font-matching");
+    let mut pdf = Document::open(Arc::new(fixture(1))).unwrap();
+    pdf.update_dict(ObjRef::new(3, 0), |f| f.set(b"BaseFont".to_vec(), Object::name("ABCDEF+Inter-Regular"))).unwrap();
+    std::fs::write(dir.join("source.pdf"), pdfcraft_cos::write_full(&pdf, &Default::default()).unwrap()).unwrap();
+    std::fs::write(dir.join("inter.ttf"), include_bytes!("../../../assets/fonts/Inter-Regular.ttf")).unwrap();
+    let mut a = auto(&dir);
+    let id = ok(&mut a, "doc_open", json!({"path":"source.pdf"}))["doc"].as_u64().unwrap();
+    let before = ok(&mut a, "doc_info", json!({"doc":id}));
+    let matched = ok(&mut a, "text_match_fonts", json!({"doc":id,"page":1}));
+    assert_eq!(matched["matched"], json!(["Inter-Regular"]));
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":id})), before);
+    assert!(a.call("text_match_fonts", &json!({"doc":id,"page":1,"directories":[dir.parent().unwrap()]})).is_err());
+    assert!(a.call("text_font_import", &json!({"doc":id,"page":1,"path":"inter.ttf","face_index":32})).is_err());
+    assert_eq!(ok(&mut a, "doc_info", json!({"doc":id})), before);
+    ok(&mut a, "text_edit", json!({"doc":id,"page":1,"paragraph":1,"text":"Page 1 é"}));
+    let lines = ok(&mut a, "text_lines", json!({"doc":id,"page":1}));
+    assert!(lines["lines"].as_array().unwrap().iter().all(|l| l["font"].as_str().unwrap().ends_with("Inter-Regular")));
+    ok(&mut a, "doc_save", json!({"doc":id,"path":"matched.pdf"}));
+    let other = ok(&mut a, "doc_open", json!({"path":"matched.pdf"}))["doc"].as_u64().unwrap();
+    ok(&mut a, "text_edit", json!({"doc":other,"page":1,"paragraph":1,"text":"Page 1 éz"}));
+    assert!(
+        ok(&mut a, "text_lines", json!({"doc":other,"page":1}))["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["font"].as_str().unwrap().ends_with("Inter-Regular"))
+    );
+    std::fs::remove_file(dir.join("inter.ttf")).unwrap();
+    for file in ["a.pdf", "b.pdf", "source.pdf", "matched.pdf"] {
+        std::fs::remove_file(dir.join(file)).unwrap();
+    }
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
 fn explicit_font_and_disjoint_ranges_save_reopen_through_tools() {
     let dir = workdir("font-ranges");
     std::fs::write(dir.join("inter.ttf"), include_bytes!("../../../assets/fonts/Inter-Regular.ttf")).unwrap();

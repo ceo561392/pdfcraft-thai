@@ -166,6 +166,14 @@ mutually exclusive with `hide_text_block`.
 
 `text_font_files` discovers eligible installed files on request (or specified confined folders),
 `text_font_import` registers a full document face, and `text_fonts` lists source/full resources.
+Discovery includes individual faces in TTF/OTF/TTC/OTC files. `text_match_fonts {doc,page,directories?}`
+caches eligible original document families without changing PDF bytes, dirty state or undo history.
+The next text edit embeds those full faces in the same undo step, preserving names, notices and
+shaping tables. Non-open fonts must already be installed, match an existing document family,
+and permit editable outline embedding under their licence and OpenType flags. They are never
+bundled with the app. `text_font_import.face_index` selects a collection face (default zero).
+Every path, including matching/discovery roots, obeys `--root` confinement.
+`text_edit_layout.substituted_font` reports automatic substitution before applying the edit.
 Use `text_edit.font_resource` to choose a resource, or keep source faces and let matching full
 faces complete absent subset glyphs. `text_edit.ranges` accepts disjoint UTF-8 byte ranges;
 `text_edit_layout` measures the same resource/range draft without committing. All changes are

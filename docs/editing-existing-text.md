@@ -74,6 +74,16 @@ resource to `text_edit.font_resource`. `text_edit.ranges` holds selected range f
 `text_edit_layout` accepts resource/ranges too and measures a draft without applying it.
 All file inputs respect CLI root confinement; importing a font and applying text are undoable.
 
+The private Windows thai.5 build also matches eligible original document families to installed
+fonts, including TTC regular/bold/italic faces. `text_match_fonts` prepares the same read-only
+document cache for automation. A subsequent edit embeds complete programs in the same undo
+step, preserving notices and shaping tables, so an installed copy is unnecessary when editing
+that saved content on another machine. Editable outline embedding must be permitted by the
+font's licence and flags. Restricted/preview-only/bitmap-only fonts are refused; no-subsetting
+fonts remain complete. These fonts are never included in the application or installer.
+The formatting panel and `text_edit_layout.substituted_font` report automatic substitution;
+the bundled fallback may differ in appearance from an unavailable original font.
+
 On a scanned page, recognised text (Scan & OCR) is an invisible layer over the picture. Edit
 text groups it into phrases: words joined by a word space, with a table cell, a tab stop and each
 scanned line kept apart. Applying an edit draws the new text visibly in the scan's ink colour (or
@@ -89,7 +99,7 @@ Explicit marked paragraph/heading scopes prevent unrelated tagged regions from m
 Compatible geometry groups untagged content, including runs split across content streams
 or equivalent graphics transforms. Geometry cannot infer author intent in every untagged
 PDF. Semantic structure-tree preservation, legacy Type 1/Type 3 inline font preview,
-font collections/variable-font instances, mixed-font/style contextual runs and complete rotated
+variable-font instances, non-Thai mixed-font/style contextual runs and complete rotated
 layout fidelity still need broader coverage. Do not interpret the passing real-file checks
 as a guarantee for every PDF.
 

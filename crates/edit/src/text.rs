@@ -132,7 +132,14 @@ pub fn text_editor_fonts(doc: &Document, page: usize) -> Result<Vec<TextEditorFo
 /// Load an explicit full face into this page's resources. Nothing on the page is replaced;
 /// the new resource can complete matching source subsets or be chosen in a text style.
 pub fn register_text_font(doc: &mut Document, page: usize, bytes: &[u8]) -> Result<String, EditError> {
-    pdfcraft_fonts::embedding::validate_document_input(bytes).map_err(EditError::Invalid)?;
+    if pdfcraft_fonts::embedding::validate_document_input(bytes).is_err() {
+        let faces = pdfcraft_fonts::document_face::faces(bytes);
+        let face = faces.first().ok_or_else(|| EditError::Invalid("the font does not permit editable document embedding".into()))?;
+        let key = pdfcraft_fonts::document_face::family_key(&face.postscript);
+        if !text_lines(doc, page)?.iter().any(|line| pdfcraft_fonts::document_face::family_key(&line.base_font) == key) {
+            return Err(EditError::Invalid("a licensed installed font may only complete an existing document family".into()));
+        }
+    }
     let (_, postscript) = pdfcraft_fonts::embedding::names(bytes).map_err(EditError::Invalid)?;
     let p = page_dict(doc, page)?;
     let mut resources = p.dict.get(b"Resources").and_then(|o| doc.dict(o)).unwrap_or_default();
@@ -149,6 +156,7 @@ pub struct TextEditLayout {
     pub source_rect: [f64; 4],
     pub draft_rect: Option<[f64; 4]>,
     pub overflow: bool,
+    pub substituted: Option<String>,
 }
 
 pub fn text_edit_layout(doc: &Document, page: usize, block: usize, text: &str, style: &BlockStyle) -> Result<TextEditLayout, EditError> {
@@ -158,7 +166,7 @@ pub fn text_edit_layout(doc: &Document, page: usize, block: usize, text: &str, s
     let original = group_blocks(&lines);
     let source = original.get(block).ok_or(EditError::Invalid("text block does not exist".into()))?;
     if text == source.editor_text && *style == BlockStyle::default() {
-        return Ok(TextEditLayout { source_rect: source.rect, draft_rect: Some(source.rect), overflow: false });
+        return Ok(TextEditLayout { source_rect: source.rect, draft_rect: Some(source.rect), overflow: false, substituted: None });
     }
     // Subtract the untouched runs by value, rather than by operator offsets: a rewrite may
     // split BT/ET or add font resources. A multiset also handles coincident repeated text.
@@ -171,7 +179,7 @@ pub fn text_edit_layout(doc: &Document, page: usize, block: usize, text: &str, s
         }
     }
     let mut draft = doc.clone();
-    rewrite_block_from(&mut draft, page, lines, block, Some(text), style, MAX_TYPE3_GLYPHS)?;
+    let outcome = rewrite_block_from(&mut draft, page, lines, block, Some(text), style, MAX_TYPE3_GLYPHS)?;
     let mut rect: Option<[f64; 4]> = None;
     for line in text_lines(&draft, page)? {
         if let Some(count) = untouched.get_mut(&key(&line))
@@ -184,7 +192,7 @@ pub fn text_edit_layout(doc: &Document, page: usize, block: usize, text: &str, s
     }
     let overflow = rect
         .is_some_and(|r| r[0] < source.rect[0] - 0.5 || r[1] < source.rect[1] - 0.5 || r[2] > source.rect[2] + 0.5 || r[3] > source.rect[3] + 0.5);
-    Ok(TextEditLayout { source_rect: source.rect, draft_rect: rect, overflow })
+    Ok(TextEditLayout { source_rect: source.rect, draft_rect: rect, overflow, substituted: outcome.substituted })
 }
 
 /// Text and graphics state captured for rewriting.
@@ -2058,6 +2066,7 @@ fn rewrite_block_from(
         && (text.unwrap_or(&b.text).chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c))
             || !style.ranges.is_empty()
             || style.resource.is_some()
+            || registered_face && (style.bold.is_some() || style.family.is_some_and(|(family, _, _)| family == source_family(&b.base_font)))
             || (text.is_some_and(|draft| {
                 draft.contains('\n')
                     || pdfcraft_fonts::source_shaping::required(draft)

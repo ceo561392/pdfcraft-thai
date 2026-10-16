@@ -61,7 +61,7 @@ pub(crate) fn installed_font_files(ctx: &egui::Context) -> Option<Vec<pdfcraft_e
 fn files_picker(purpose: FilePurpose) -> rfd::AsyncFileDialog {
     let dialog = rfd::AsyncFileDialog::new();
     if matches!(purpose, FilePurpose::TextFont { .. }) {
-        return dialog.add_filter("TrueType / OpenType font", &["ttf", "otf"]);
+        return dialog.add_filter("TrueType / OpenType font", &["ttf", "otf", "ttc", "otc"]);
     }
     if purpose == FilePurpose::RedactWords {
         return dialog.add_filter(tl!("Text"), &["txt"]);
@@ -468,6 +468,13 @@ impl PdfCraftApp {
         match purpose {
             FilePurpose::TextFont { page } => {
                 let Some((_, bytes)) = files.into_iter().next() else { return };
+                let bytes = match pdfcraft_fonts::document_face::select(&bytes, 0) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        self.notify_error(error);
+                        return;
+                    }
+                };
                 if self.apply_edit(Edit::RegisterTextFont { page, bytes: Arc::new(bytes) })
                     && let Some((index, id)) = self.active_ids()
                     && let Some(doc) = self.session.get(id)

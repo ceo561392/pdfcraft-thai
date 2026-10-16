@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod craft;
+pub mod document_face;
 pub mod embedding;
 mod encodings;
 pub mod fallback;

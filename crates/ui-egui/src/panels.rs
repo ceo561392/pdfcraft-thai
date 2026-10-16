@@ -380,6 +380,12 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     {
         let mut ed = ed;
         let mut changed = false;
+        if let Some(font) = app.views[i].text_background.substituted_font() {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                format!("{} {font}. {}", tl!("Using substitute font:"), tl!("Its appearance may differ from the original.")),
+            );
+        }
         let font_choices = app.session.get(app.views[i].id).map(|d| d.text_editor_fonts(ed.page)).unwrap_or_default();
         egui::ComboBox::from_id_salt("document-font-resource")
             .selected_text(
@@ -390,7 +396,7 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
             )
             .show_ui(ui, |ui| {
                 changed |= ui.selectable_value(&mut ed.font_resource, None, tl!("Keep source fonts")).changed();
-                for font in font_choices.iter().filter(|f| !f.resource.starts_with("PCApproved")) {
+                for font in font_choices.iter().filter(|f| !f.resource.starts_with("PCApproved") && !f.resource.starts_with("PCMatched")) {
                     changed |= ui.selectable_value(&mut ed.font_resource, Some(font.resource.clone()), &font.face).changed();
                 }
             });
@@ -403,9 +409,20 @@ fn format_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
                 if fonts.is_empty() {
                     ui.label(tl!("No openly licensed document fonts found. Load a font file."));
                 }
-                for font in fonts {
+                let families: std::collections::HashSet<_> = app
+                    .session
+                    .get(app.views[i].id)
+                    .map(|d| d.text_lines(ed.page))
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|l| pdfcraft_fonts::document_face::family_key(&l.base_font))
+                    .collect();
+                for font in fonts.into_iter().filter(|f| f.open_license || families.contains(&pdfcraft_fonts::document_face::family_key(&f.face))) {
                     if ui.selectable_label(false, &font.face).clicked() {
-                        app.use_paths(crate::files::FilePurpose::TextFont { page: ed.page }, &[font.path]);
+                        match pdfcraft_engine::text_fonts::read_face(&font.path, font.index) {
+                            Ok(bytes) => app.use_files(crate::files::FilePurpose::TextFont { page: ed.page }, vec![(font.face, bytes)]),
+                            Err(error) => app.notify_error(error),
+                        }
                     }
                 }
             } else {

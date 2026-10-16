@@ -2545,17 +2545,32 @@ fn deleting_a_draft_does_not_show_the_original_text_underneath() {
 
 #[test]
 fn compact_thai_fallback_preview_and_saved_size_agree() {
+    thai_preview_and_saved_size_agree(false);
+}
+
+#[test]
+fn matched_thai_source_keeps_original_preview_and_saved_size() {
+    thai_preview_and_saved_size_agree(true);
+}
+
+fn thai_preview_and_saved_size_agree(matched: bool) {
     use pdfcraft_cos::{Dict, Document, ObjRef, Object, SaveOptions, Stream};
     use std::sync::Arc;
     let Some(face) = pdfcraft_fonts::document_thai_edit_font(false) else { return };
     let mut source = Document::open(Arc::new(fixture(1))).unwrap();
-    let widths =
-        "กขค".chars().map(|c| Object::Real(pdfcraft_fonts::source_shaping::shape(face.bytes, &c.to_string()).unwrap().advance * 600.0)).collect();
+    let widths = "กขค"
+        .chars()
+        .map(|c| {
+            Object::Real(pdfcraft_fonts::source_shaping::shape(face.bytes, &c.to_string()).unwrap().advance * if matched { 1000.0 } else { 600.0 })
+        })
+        .collect();
     let cmap = b"begincmap 1 begincodespacerange <00> <FF> endcodespacerange 3 beginbfchar <61> <0E01> <62> <0E02> <63> <0E04> endbfchar endcmap";
     let unicode = Object::Ref(source.add(Object::Stream(Stream::from_raw(Dict::new(), cmap.to_vec()))));
     source
         .update_dict(ObjRef::new(3, 0), |f| {
-            f.set(b"BaseFont".to_vec(), Object::name("SyntheticCompactThai"));
+            let family = pdfcraft_fonts::embedding::names(face.bytes).unwrap().1;
+            let base = if matched { format!("ABCDEF+{family}") } else { "SyntheticCompactThai".into() };
+            f.set(b"BaseFont".to_vec(), Object::name(&base));
             f.set(b"FirstChar".to_vec(), Object::Int(97));
             f.set(b"LastChar".to_vec(), Object::Int(99));
             f.set(b"Widths".to_vec(), Object::Array(widths));
@@ -2572,6 +2587,16 @@ fn compact_thai_fallback_preview_and_saved_size_agree() {
         app
     });
     h.run_steps(4);
+    let font_dir = std::env::temp_dir().join(format!("pdfcraft-ui-matched-thai-{}", std::process::id()));
+    if matched {
+        std::fs::create_dir_all(&font_dir).unwrap();
+        std::fs::write(font_dir.join("thai.ttf"), face.bytes).unwrap();
+        let files = pdfcraft_engine::text_fonts::discover(std::slice::from_ref(&font_dir));
+        let app = h.state_mut();
+        let id = app.views[0].id;
+        assert_eq!(app.session.match_text_fonts(id, 0, &files).unwrap().len(), 1);
+        assert!(!app.session.get(id).unwrap().dirty);
+    }
     assert!(h.state_mut().execute("edit.edit_text"));
     h.run_steps(2);
     let page = h.state().views[0].page_screen_rect(0).unwrap();
@@ -2595,12 +2620,26 @@ fn compact_thai_fallback_preview_and_saved_size_agree() {
             _ => None,
         })
         .unwrap();
-    let expected = 9.0 * page.width() / 200.0;
+    let points = if matched { 15.0 } else { 9.0 };
+    let expected = points * page.width() / 200.0;
     assert!(galley.job.sections.iter().all(|s| (s.format.font_id.size - expected).abs() < 0.1));
+    if matched {
+        assert!(
+            galley.job.sections.iter().all(|s| matches!(&s.format.font_id.family,egui::FontFamily::Name(name) if name.starts_with("pdf-source-")))
+        );
+        let doc = h.state().session.get(h.state().views[0].id).unwrap();
+        assert!(doc.text_edit_layout(0, 0, "กขคกขคง", &Default::default()).unwrap().substituted.is_none());
+    }
     h.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
     h.run_steps(4);
     let doc = h.state().session.get(h.state().views[0].id).unwrap();
-    assert!((doc.text_lines(0)[0].size - 9.0).abs() < 0.02);
+    assert!((doc.text_lines(0)[0].size - f64::from(points)).abs() < 0.02);
+    if matched {
+        assert_eq!(doc.text_lines(0)[0].base_font, "Sarabun-Regular");
+        assert!(doc.text_editor_fonts(0).iter().any(|f| f.resource.starts_with("PCFull")));
+        std::fs::remove_file(font_dir.join("thai.ttf")).unwrap();
+        std::fs::remove_dir(font_dir).unwrap();
+    }
 }
 
 #[test]

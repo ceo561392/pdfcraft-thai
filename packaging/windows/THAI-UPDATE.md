@@ -20,6 +20,20 @@ explicit sizes and usable source faces remain authoritative. Sparse or invalid
 metrics leave the size unchanged. This approximates the original proportions;
 it does not reproduce a different typeface's exact glyph design.
 
+Version thai.5 matches original document families and regular/bold/italic styles to
+eligible fonts already installed on the editing machine, including TTC collections
+such as Cordia New. Discovery is read-only; a text edit embeds the complete matched
+face in its own undo step, preserving names, notices, outlines and shaping tables.
+The saved PDF can then be edited on another machine using that embedded face,
+including untouched pages of the same family. Complete programs saved by the app
+are cached from the document on reopen, before installed-font matching. New shaped
+resources keep the program's PostScript name instead of carrying forward a subset tag.
+Restricted, preview-only and bitmap-only embedding is refused; no-subsetting fonts
+remain complete. Installed fonts are document inputs, never installer/Git assets.
+If no usable original face is available, the bundled Thai fallback remains available
+and the editing panel reports substitution before Apply. Different fonts may look
+different; this does not promise exact matching for every PDF or every machine.
+
 Sarabun Regular and Bold come unmodified from
 [google/fonts at 88058c7](https://github.com/google/fonts/tree/88058c714073e72bb1b32baffc2d4ce9bc73944c/ofl/sarabun),
 by the Sarabun Project Authors (cadsondemak), under OFL-1.1. Font binaries stay in the
@@ -30,7 +44,7 @@ With Rust/MSVC, the Windows SDK and WiX 5.0.2 available, run from the repository
 
 ```powershell
 ./packaging/windows/prepare-thai-fonts.ps1 -FontRoot ../craft-fonts
-$env:PDFCRAFT_VERSION = '0.8.0-thai.4'
+$env:PDFCRAFT_VERSION = '0.8.0-thai.5'
 $env:PDFCRAFT_BUILD_SHA = 'local-thai-fix'
 ./packaging/windows/package.ps1 -Arch x64
 ```

@@ -1,8 +1,9 @@
 # PdfCraft roadmap
 
-> Local update, 2026-10-16 (M7): Thai mixed-font/style rows now save and reopen;
-> grapheme boundaries preserve base/mark shaping and character spacing. Three new
-> regressions pass with the 161-test edit suite. Scope and estimates unchanged.
+> Local update, 2026-10-16 (M7): thai.5 matches eligible installed document families,
+> including TTC regular/bold/italic faces, and embeds complete programs with text edits.
+> Matching and draft substitution reports are read-only; source fonts stay out of packages.
+> Compact fallback sizing and mixed-style Thai shaping remain supported. Estimates unchanged.
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
 
@@ -160,6 +161,12 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 | 8 | 1.0 polish: performance, right-to-left, missing languages, keyboard-only (M14) | 55–95 |
 
 ## Progress log
+
+2026-10-16: Private-fork thai.5 adds original-family installed-font matching, bounded TTC face
+selection, complete editable embedding in the text edit's undo step, and substitution warnings.
+The user-approved runtime document-font exception does not allow proprietary installer/Git assets.
+Saved full fonts remain available when editing without an installed copy; broader PDF fidelity
+and variable-font instances remain partial. Estimates unchanged.
 
 2026-10-15: Private-fork packaging removes upstream trademark artwork from the interface and source assets, retains upstream credits, and produces the Windows Thai update `0.8.0-thai.2`. Font editing behavior and readiness estimates are unchanged.
 

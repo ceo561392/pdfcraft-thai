@@ -357,6 +357,8 @@ impl Editor {
 }
 
 pub struct Document {
+    matched_text_fonts: Vec<text_fonts::MatchedFace>,
+    font_match_checked: Option<(usize, u64)>,
     pub id: DocId,
     pub name: String,
     pub path: Option<String>,
@@ -2198,6 +2200,7 @@ fn check_permission(edit: &Edit, p: &pdfcraft_cos::Permissions) -> Result<(), Ed
 
 /// Dates and unique ids stamped onto what an edit creates.
 struct EditCtx {
+    matched_text_fonts: Vec<text_fonts::MatchedFace>,
     /// Field scripts run (`None`: JavaScript is off) and what they produced.
     js: Option<js::JsRunner>,
     /// A laid-out XFA form's template (`None`: not an XFA form, or JavaScript is off) and what
@@ -2234,6 +2237,7 @@ impl EditCtx {
             seed ^= std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as u64).unwrap_or(0) << 32;
         }
         Self {
+            matched_text_fonts: Vec::new(),
             js: None,
             xfa: None,
             xfa_out: Default::default(),
@@ -2470,7 +2474,11 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
             a11y::move_tag(doc, *object, *anchor, *placement).map_err(|e| EditError::Accessibility(e.to_string()))?;
         }
         Edit::EditTextLine { page, line, text } => {
-            pdfcraft_edit::replace_line(doc, *page, *line, text)?;
+            text_fonts::embed_matches(doc, *page, &cx.matched_text_fonts)?;
+            let outcome = pdfcraft_edit::replace_line(doc, *page, *line, text)?;
+            if let Some(font) = outcome.substituted {
+                doc.note_repair(format!("Text edit used substitute font {font}; its appearance may differ from the original."));
+            }
         }
         Edit::SetFieldScript { name, event, script } => {
             pdfcraft_forms::set_field_script(doc, name, event, script.as_deref())?;
@@ -2517,7 +2525,11 @@ fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut EditCtx) -> 
         }
         Edit::MoveObjects { page, objects, offset } => pdfcraft_edit::move_objects(doc, *page, objects, *offset)?,
         Edit::EditTextBlock { page, block, text, style } => {
-            pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            text_fonts::embed_matches(doc, *page, &cx.matched_text_fonts)?;
+            let outcome = pdfcraft_edit::rewrite_block(doc, *page, *block, Some(text), style)?;
+            if let Some(font) = outcome.substituted {
+                doc.note_repair(format!("Text edit used substitute font {font}; its appearance may differ from the original."));
+            }
         }
         Edit::RegisterTextFont { page, bytes } => {
             pdfcraft_edit::text::register_text_font(doc, *page, bytes)?;
@@ -3555,7 +3567,10 @@ impl Session {
         }
         let sig_cache = Arc::new(pdfcraft_sign::DigestCache::default());
         let signatures = editor.as_ref().map(|e| signatures_of(&e.cos, &bytes, trust, &sig_cache)).unwrap_or_default();
+        let matched_text_fonts = editor.as_ref().map(|e| text_fonts::embedded_faces(&e.cos)).unwrap_or_default();
         Document {
+            matched_text_fonts,
+            font_match_checked: Default::default(),
             id: DocId(0),
             name,
             path,
@@ -3600,6 +3615,7 @@ impl Session {
         let name = doc.name.clone();
         let is_xfa = doc.info.xfa.is_some();
         let mut cx = EditCtx::new(now, doc.generation ^ (id.0 << 48));
+        cx.matched_text_fonts = doc.matched_text_fonts.clone();
         if !js_off {
             cx.xfa = doc.xfa_template.clone();
         }

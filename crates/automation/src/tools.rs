@@ -1259,12 +1259,15 @@ pub fn tools() -> Vec<ToolDef> {
             .destructive()
             .cmd("edit.edit_text")
             .with(schema(json!({ "doc": doc(), "page": { "type": "integer", "minimum": 1 }, "image": { "type": "integer", "minimum": 1 }, "path": { "type": "string" } }), &["doc", "page", "image", "path"])),
-        t("text_font_files", "List installed document fonts", "Discover openly licensed, embeddable TrueType/OpenType files on request. Optional directories (at most 16) restrict the scan; with --root, only that root is scanned by default and supplied folders must stay inside it. The scan skips symlinks, collections and invalid/licence-restricted fonts, with depth, entry and byte budgets. Select a returned path with text_font_import.")
+        t("text_font_files", "List installed document fonts", "Discover editable document faces, including TrueType collections. Returns face_index and open_license; non-open faces may only complete an existing PDF family. Optional directories (at most 16) restrict the bounded scan; --root confines all paths. Select a returned path and face_index with text_font_import.")
             .ro().cmd("edit.edit_text")
             .with(schema(json!({"directories":{"type":"array","items":{"type":"string"},"maxItems":16}}), &[])),
-        t("text_font_import", "Load document font", "Load an explicitly selected, openly licensed full TrueType/OpenType face into a page. The program's family, embedding permissions and licence declaration are validated. Completes source subsets of the same face without replacing existing glyphs. Returns a font resource usable with text_edit.font_resource. Undoable; respects root confinement. No system-interface fallback is exported.")
+        t("text_match_fonts", "Match original document fonts", "Find installed faces matching the page's original families and styles, with editable embedding permission. Caches full programs only for this open document; no PDF bytes, dirty state or undo change. The next text edit embeds eligible matches atomically. Optional directories and --root use the same confinement as text_font_files.")
+            .ro().cmd("edit.edit_text")
+            .with(schema(json!({"doc":doc(),"page":{"type":"integer","minimum":1},"directories":{"type":"array","items":{"type":"string"},"maxItems":16}}), &["doc","page"])),
+        t("text_font_import", "Load document font", "Load an explicitly selected full face (face_index defaults to 0 for a collection). Open fonts are allowed; licensed installed fonts may only complete an existing PDF family and must permit editable outline embedding. Returns a font resource usable with text_edit.font_resource. Undoable and root-confined. Never exports an interface fallback.")
             .cmd("edit.edit_text")
-            .with(schema(json!({"doc":doc(), "page":{"type":"integer","minimum":1}, "path":{"type":"string"}}), &["doc","page","path"])),
+            .with(schema(json!({"doc":doc(), "page":{"type":"integer","minimum":1}, "path":{"type":"string"},"face_index":{"type":"integer","minimum":0,"maximum":31}}), &["doc","page","path"])),
         t("text_fonts", "List document fonts", "List validated embedded source faces and approved full preview faces for a page. Full registered resources can be selected by text_edit.font_resource; preview_only faces are not PDF resource names.")
             .ro().cmd("edit.edit_text")
             .with(schema(json!({"doc":doc(), "page":{"type":"integer","minimum":1}}), &["doc","page"])),
